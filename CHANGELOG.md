@@ -8,6 +8,12 @@
   name and passes raw requests to it, such as the Keymaster app the
   bootloader leaves resident; qseecom is allowed on the Fairphone 3
   (`patches/linux/0003`, experimental).
+- Patterns on the RGB notification LED, played by the PMIC: the kernel's
+  `pattern` LED trigger is built in, and a kernel patch gives it the
+  default repeat count it claims to have, which the PMI632 LPG driver
+  rejected, so `hw_pattern` now takes a blink or a breathing ramp. The
+  PMIC runs it from its SDAM through PBS, through suspend to idle and
+  with no help from the CPU.
 
 ### Fixed
 
