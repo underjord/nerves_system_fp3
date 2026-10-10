@@ -11,7 +11,7 @@ Snapdragon 632 (MSM8953), aarch64. One firmware image runs on both.
 | Storage      | eMMC; firmware lives inside the Android `userdata` partition|
 | Linux        | `mlainez/linux-msm8953`, 6.19                               |
 | Bootloader   | lk2nd-msm8953 → `extlinux/extlinux.conf` on the boot partition |
-| Console      | On-device display (`tty1`) or serial debug pads (`ttyMSM0`) |
+| Console      | IEx on the display (`tty1`) or the serial debug pads (`ttyMSM0`); kernel messages go to serial and `dmesg` only |
 | Cellular     | 2G/3G/LTE dual SIM over QMI                                 |
 | Wi-Fi / BT   | wcnss/prima via remoteproc, BlueZ userspace                 |
 | NFC          | Yes                                                         |

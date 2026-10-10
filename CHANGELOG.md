@@ -15,6 +15,18 @@
   PMIC runs it from its SDAM through PBS, through suspend to idle and
   with no help from the CPU.
 
+### Changed
+
+- The display is no longer a kernel console (`console=tty0` is gone from
+  the kernel command line). Every kernel message was also drawn into the
+  framebuffer console behind the firmware's UI, rotated and in a 16x32
+  font, and a burst of them stalled userspace: the two warning backtraces
+  the camera drivers print after a resume from suspend froze the UI for
+  about eleven seconds, against one second without the on-panel console.
+  Kernel messages still go to `dmesg`, to Nerves' kmsg tailer (RingLogger)
+  and to the serial port. fbcon stays bound to the panel, so erlinit's IEx
+  prompt on `tty1` is still shown.
+
 ### Fixed
 
 - Both microphones of a Fairphone 3 at once. Routing the top mic onto a
