@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `/dev/qseecom_raw`, which looks up a trusted application in QSEE by
+  name and passes raw requests to it, such as the Keymaster app the
+  bootloader leaves resident; qseecom is allowed on the Fairphone 3
+  (`patches/linux/0003`, experimental).
+
 ### Fixed
 
 - Both microphones of a Fairphone 3 at once. Routing the top mic onto a
