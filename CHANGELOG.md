@@ -1,11 +1,50 @@
 # Changelog
 
-## v0.2.4
+## v0.3.1
 
-Security and bug fix update of the Nerves platform.
+### Added
+
+- `/dev/qseecom_raw`, which looks up a trusted application in QSEE by
+  name and passes raw requests to it, such as the Keymaster app the
+  bootloader leaves resident; qseecom is allowed on the Fairphone 3
+  (`patches/linux/0003`, experimental).
+- Patterns on the RGB notification LED, played by the PMIC: the kernel's
+  `pattern` LED trigger is built in, and a kernel patch gives it the
+  default repeat count it claims to have, which the PMI632 LPG driver
+  rejected, so `hw_pattern` now takes a blink or a breathing ramp. The
+  PMIC runs it from its SDAM through PBS, through suspend to idle and
+  with no help from the CPU.
+- x264, Opus and PortAudio (with its ALSA backend) in the root file
+  system, for Membrane's H.264, Opus and PortAudio plugins. ffmpeg picks
+  up the libx264 encoder and libopus from them as well.
+- Tools for bringing up the Elan fingerprint sensor, whose SPI bus
+  (a BLSP QUP) TrustZone owns: `qcom_scm_blsp_modify_ownership()`, the
+  TrustZone call that moves a QUP to Linux, with debugfs knobs under
+  `/sys/kernel/debug/qcom_scm` to try it from a running system; the
+  `qcom,tz-blsp-handover` property, which has spi-qup ask for its QUP
+  before probing; `/dev/dtbo`, which applies a device tree overlay from
+  userspace so a node can be tried without a reflash; and spidev binding
+  `elan,efsa-fingerprint` (`patches/linux/0005` to `0009`). spidev is
+  enabled. All of it is experimental.
+- `qcom_camss.debug_vc` and `debug_dt`: the CSI-2 virtual channel and
+  data type that camss streams take, read when a stream starts. They are
+  0 normally: virtual channel 0, and the format's data type. The IMX363
+  sends its phase detection pixels on virtual channel 1, which an RDI
+  path can now capture (`patches/linux/0010`).
+- GitHub Actions workflow that builds the system for `v*` tags and
+  publishes the artifact as a prerelease.
 
 ### Changed
 
+- The display is no longer a kernel console (`console=tty0` is gone from
+  the kernel command line). Every kernel message was also drawn into the
+  framebuffer console behind the firmware's UI, rotated and in a 16x32
+  font, and a burst of them stalled userspace: the two warning backtraces
+  the camera drivers print after a resume from suspend froze the UI for
+  about eleven seconds, against one second without the on-panel console.
+  Kernel messages still go to `dmesg`, to Nerves' kmsg tailer (RingLogger)
+  and to the serial port. fbcon stays bound to the panel, so erlinit's IEx
+  prompt on `tty1` is still shown.
 - `nerves_system_br` 1.35.0 → 1.35.3: Buildroot 2026.08 → 2026.08.1
   (including the eMudhra ca-certificates update) and Erlang/OTP
   29.1 → 29.1.2 on the device. Host toolchain binaries no longer run with
@@ -13,10 +52,100 @@ Security and bug fix update of the Nerves platform.
   Hex packages that build native code with CMake.
 - Build hosts: Erlang/OTP 29.1.2 / Elixir 1.20.5-otp-29 (`.tool-versions`).
 
+### Fixed
+
+- Both microphones of a Fairphone 3 at once. Routing the top mic onto a
+  second SLIMbus TX port ("AIF1_CAP Mixer SLIM TX8") recorded silence,
+  overflowed TX7 and crashed the kernel: the WCD9335 driver armed only
+  the lowest port of a capture DAI (`patches/linux/0001`). With both
+  ports armed the two channels came back bit-identical, because the
+  SLIMBUS_0_TX backend fixup left the channel count at its minimum of 1
+  and the ADSP opened a mono COPP for a two-port capture; the backend now
+  takes the number of codec TX ports (`patches/linux/0002`). Capturing
+  `hw:0,1` with as many channels as ports routed gives one channel per
+  mic; a mismatch no longer crashes (the ADSP down- or up-mixes).
+
+## v0.3.0
+
+The cameras now run through the phone's camera image processor (the
+msm8953 VFE) instead of software, and video through a working hardware
+encoder.
+
 ### Added
 
-- GitHub Actions workflow that builds the system for `v*` tags and
-  publishes the artifact as a prerelease.
+- Hardware image processing for all four camera modules (Fairphone 3:
+  IMX363 and S5K4H7YX; Fairphone 3+: S5KGM1SP and S5K3P9SP). The VFE
+  pixel path demosaics, white balances, colour corrects with each
+  sensor's calibrated matrix and black level, gamma corrects, scales and
+  crops every frame and writes NV12. libcamera drives it through a new
+  `camss` pipeline handler and IPA (`patches/libcamera/0006` to `0011`):
+  automatic or manual exposure, gain and white balance, manual focus,
+  frame rate, and digital zoom through the standard `ScalerCrop` control.
+  A 1080p or 4K stream at 30 fps takes about 6% of the CPU.
+- Frames go to the Venus H.264 encoder without a copy when libcamera's
+  `camss.nv12_plane_alignment` option lays them out as Venus reads them.
+- Focus on the Fairphone 3 rear camera: an LC898217XC lens driver, and the
+  IMX363 module that answers at 0x10 now describes that actuator.
+- A 256 MB CMA reservation for full-resolution camera buffers, and the
+  GStreamer watchdog element for camera streams.
+
+### Fixed
+
+- Venus encoder: sessions stalled mid-stream when the firmware power
+  collapsed the codec between frames; bitrates overshot about twelvefold
+  because the firmware budgeted from frame-number timestamps; noisy
+  frames outran the clock table; heavy sessions now use the firmware's
+  power-save mode; a firmware that stops answering is restarted.
+- A camera stream froze for a second whenever its buffers briefly ran
+  out: the VFE could leave its frame-drop pattern unchanged until its
+  counter wrapped.
+- The S5KGM1SP and S5K3P9SP take 0.7 s less to start streaming: their
+  register setfiles are written in bursts.
+- 4000x3000 NV12 frames on the rear Fairphone 3+ camera, which the video
+  node sized too small.
+
+### Changed
+
+- The kernel is built from `linux-msm8953` 6.19 staging `e1d55840ba63`.
+- `fp3_camera` uses the hardware path; `fp3-camera-utils`
+  and the software-ISP libcamera patches (`0001` to `0005`) remain for
+  the older tools.
+
+## v0.2.4
+
+### Fixed
+
+- Earpiece and microphone on the Fairphone 3+. The WCD9335 register map
+  cached its page selector, which the ADSP moves when it starts a
+  SLIMbus port, so the earpiece amplifier, interpolator clock and
+  analog clock writes issued at stream start landed on the wrong page.
+  The selector is now written before every access.
+- The first recording after boot was silent on both models; it took a
+  throwaway recording to wake the microphone up. The codec's capture
+  port is now enabled before the SLIMbus connection that activates it.
+- About one boot in seven on a Fairphone 3 recorded only silence for the
+  whole boot. The SLIMbus controller reported a message as sent as soon
+  as it was queued, before it went out on the bus; it now waits for the
+  controller's own completion.
+- The loudspeaker played along with the earpiece on the Fairphone 3+
+  after switching routes. A playback session's mixer switches are now
+  exclusive, so switching to a new output disconnects the old one.
+- A kernel panic in the SLIMbus controller when its DMA completion
+  arrived after the sender had already returned.
+- `/sys/fs/pstore` is mounted at boot, so ramoops panic logs survive a
+  crash and can be read after the reboot.
+- Mesa Freedreno counted depth/stencil MSAA samples twice when sizing GMEM
+  tiles, making an ordinary 4x MSAA batch appear too large for the Adreno
+  506's 136 KiB of GMEM. This could leave Emerge's OpenGL render thread
+  spinning in the tile-size search. Count samples once for both depth and
+  separate stencil planes.
+- Mesa (freedreno): a GL app could hang a thread at 100% CPU for tens of
+  seconds or more per frame on the Adreno 506. For small render targets
+  with deep MSAA depth/stencil buffers, even the smallest GMEM bins don't
+  fit the 136 KB of GMEM, and `calc_nbins()` searched until it overflowed.
+  Such batches now render in sysmem instead
+  (`patches/mesa3d/0002-freedreno-fall-back-to-sysmem-when-no-bins-fit-in-GMEM.patch`).
+  Apps that set `FD_MESA_DEBUG=sysmem` to avoid the hang can drop it.
 
 ## v0.2.3
 
