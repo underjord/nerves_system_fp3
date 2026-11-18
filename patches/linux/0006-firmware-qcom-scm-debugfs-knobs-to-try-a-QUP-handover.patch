@@ -1,0 +1,158 @@
+firmware: qcom: scm: debugfs knobs to try a QUP handover
+
+Two files under /sys/kernel/debug/qcom_scm for bringing up a
+TrustZone-owned peripheral from a running system: blsp_ownership asks for
+a QUP by number, readl reads back one register to show whether the
+handover took. Both log to the kernel ring buffer.
+
+diff -Nur a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+--- a/drivers/firmware/qcom/qcom_scm.c	2026-10-20 12:08:30
++++ b/drivers/firmware/qcom/qcom_scm.c	2026-10-20 12:08:30
+@@ -10,6 +10,7 @@
+ #include <linux/clk.h>
+ #include <linux/completion.h>
+ #include <linux/cpumask.h>
++#include <linux/debugfs.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/err.h>
+ #include <linux/export.h>
+@@ -18,6 +19,7 @@
+ #include <linux/init.h>
+ #include <linux/interconnect.h>
+ #include <linux/interrupt.h>
++#include <linux/io.h>
+ #include <linux/kstrtox.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -28,7 +30,9 @@
+ #include <linux/platform_device.h>
+ #include <linux/reset-controller.h>
+ #include <linux/sizes.h>
++#include <linux/string.h>
+ #include <linux/types.h>
++#include <linux/uaccess.h>
+ 
+ #include "qcom_scm.h"
+ #include "qcom_tzmem.h"
+@@ -2349,6 +2353,112 @@
+ module_param_cb(download_mode, &download_mode_param_ops, NULL, 0644);
+ MODULE_PARM_DESC(download_mode, "download mode: off/0/N for no dump mode, full/on/1/Y for full dump mode, mini for minidump mode and full,mini for both full and minidump mode together are acceptable values");
+ 
++#ifdef CONFIG_DEBUG_FS
++/*
++ * Knobs for trying a TrustZone-owned peripheral from a running system,
++ * under /sys/kernel/debug/qcom_scm:
++ *
++ *   blsp_ownership  write "<qup> <owner>" (owner 1 is Linux, 3 TrustZone)
++ *                   to ask for a BLSP QUP; the outcome is logged
++ *   readl           write a physical address in hex; it is read as a
++ *                   32-bit register, logged, and returned by read()
++ *
++ * A read of a register TrustZone still owns faults, so readl is the
++ * deliberate test of whether a handover took.
++ */
++static struct dentry *qcom_scm_debugfs;
++static char qcom_scm_readl_result[48] = "no read yet\n";
++
++static ssize_t qcom_scm_blsp_ownership_write(struct file *file,
++					     const char __user *ubuf,
++					     size_t count, loff_t *ppos)
++{
++	char buf[32];
++	unsigned int qup, owner;
++	int ret;
++
++	if (count >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, count))
++		return -EFAULT;
++	buf[count] = '\0';
++
++	if (sscanf(buf, "%u %u", &qup, &owner) != 2)
++		return -EINVAL;
++
++	ret = qcom_scm_blsp_modify_ownership(qup, owner);
++	dev_info(__scm->dev, "debugfs: BLSP QUP %u -> owner %u: %d\n",
++		 qup, owner, ret);
++
++	return ret ? ret : count;
++}
++
++static const struct file_operations qcom_scm_blsp_ownership_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = qcom_scm_blsp_ownership_write,
++	.llseek = noop_llseek,
++};
++
++static ssize_t qcom_scm_readl_write(struct file *file, const char __user *ubuf,
++				    size_t count, loff_t *ppos)
++{
++	char buf[32];
++	void __iomem *base;
++	u64 addr;
++	u32 val;
++
++	if (count >= sizeof(buf))
++		return -EINVAL;
++	if (copy_from_user(buf, ubuf, count))
++		return -EFAULT;
++	buf[count] = '\0';
++
++	if (kstrtou64(strim(buf), 16, &addr) || (addr & 3))
++		return -EINVAL;
++
++	base = ioremap(addr & PAGE_MASK, PAGE_SIZE);
++	if (!base)
++		return -ENOMEM;
++	val = readl(base + (addr & ~PAGE_MASK));
++	iounmap(base);
++
++	dev_info(__scm->dev, "debugfs: readl %#llx = %#010x\n", addr, val);
++	scnprintf(qcom_scm_readl_result, sizeof(qcom_scm_readl_result),
++		  "%#llx = %#010x\n", addr, val);
++
++	return count;
++}
++
++static ssize_t qcom_scm_readl_read(struct file *file, char __user *ubuf,
++				   size_t count, loff_t *ppos)
++{
++	return simple_read_from_buffer(ubuf, count, ppos, qcom_scm_readl_result,
++				       strlen(qcom_scm_readl_result));
++}
++
++static const struct file_operations qcom_scm_readl_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.read = qcom_scm_readl_read,
++	.write = qcom_scm_readl_write,
++	.llseek = default_llseek,
++};
++
++static void qcom_scm_debugfs_init(void)
++{
++	qcom_scm_debugfs = debugfs_create_dir("qcom_scm", NULL);
++	debugfs_create_file("blsp_ownership", 0200, qcom_scm_debugfs, NULL,
++			    &qcom_scm_blsp_ownership_fops);
++	debugfs_create_file("readl", 0600, qcom_scm_debugfs, NULL,
++			    &qcom_scm_readl_fops);
++}
++#else
++static void qcom_scm_debugfs_init(void)
++{
++}
++#endif
++
+ static int qcom_scm_probe(struct platform_device *pdev)
+ {
+ 	struct qcom_tzmem_pool_config pool_config;
+@@ -2467,6 +2577,8 @@
+ 
+ 	/* Initialize the QTEE object interface. */
+ 	qcom_scm_qtee_init(scm);
++
++	qcom_scm_debugfs_init();
+ 
+ 	return 0;
+ }

@@ -1,0 +1,49 @@
+spi: qup: hand a TrustZone-owned QUP to Linux before probing it
+
+A QUP given to a trusted application faults when Linux touches its
+registers. A board that wants Linux to drive it anyway sets
+qcom,tz-blsp-handover to the QUP's number as TrustZone counts them, and
+the probe asks TrustZone for the QUP before the first register access.
+A refusal fails the probe cleanly instead of faulting.
+
+diff -Nur a/drivers/spi/spi-qup.c b/drivers/spi/spi-qup.c
+--- a/drivers/spi/spi-qup.c	2026-10-20 12:08:29
++++ b/drivers/spi/spi-qup.c	2026-10-20 12:08:30
+@@ -8,6 +8,7 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/dmaengine.h>
+ #include <linux/err.h>
++#include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/interconnect.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+@@ -1028,10 +1029,28 @@
+ 	struct resource *res;
+ 	struct device *dev;
+ 	void __iomem *base;
+-	u32 max_freq, iomode, num_cs;
++	u32 max_freq, iomode, num_cs, qup_id;
+ 	int ret, irq, size;
+ 
+ 	dev = &pdev->dev;
++
++	/*
++	 * A QUP that TrustZone keeps for a trusted application faults when
++	 * Linux touches it. A board that wants Linux to drive it anyway names
++	 * the QUP, as TrustZone numbers them, in qcom,tz-blsp-handover, and it
++	 * is asked for before the first register access. TrustZone may refuse.
++	 */
++	if (!of_property_read_u32(dev->of_node, "qcom,tz-blsp-handover", &qup_id)) {
++		if (!IS_ENABLED(CONFIG_QCOM_SCM))
++			return dev_err_probe(dev, -ENODEV,
++					     "QUP %u handover needs QCOM_SCM\n", qup_id);
++		if (!qcom_scm_is_available())
++			return -EPROBE_DEFER;
++		ret = qcom_scm_blsp_modify_ownership(qup_id, QCOM_SCM_BLSP_OWNER_APSS);
++		if (ret)
++			return dev_err_probe(dev, ret, "TrustZone kept QUP %u\n", qup_id);
++		dev_info(dev, "QUP %u handed over from TrustZone\n", qup_id);
++	}
+ 	base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+ 	if (IS_ERR(base))
+ 		return PTR_ERR(base);
