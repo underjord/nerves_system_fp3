@@ -1,0 +1,85 @@
+name: CI
+
+# Builds the Nerves system and publishes the artifact
+# (nerves_system_fp3-portable-<version>-<checksum>.tar.gz) as an asset of a
+# GitHub prerelease for the pushed tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  OTP_VERSION: 29.1.2
+  ELIXIR_VERSION: 1.20.5-otp-29
+  NERVES_BOOTSTRAP_VERSION: 1.17.4
+  FWUP_VERSION: 1.16.0
+
+permissions:
+  contents: read
+
+jobs:
+  build-system:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/local/share/powershell /usr/share/swift
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential automake autoconf git squashfs-tools pkg-config \
+            curl wget libmnl-dev libssl-dev libncurses-dev help2man \
+            libconfuse-dev libarchive-dev bc cpio rsync unzip file python3 \
+            cmake libelf-dev
+          curl -fsSL -o /tmp/fwup.deb \
+            "https://github.com/fwup-home/fwup/releases/download/v${FWUP_VERSION}/fwup_${FWUP_VERSION}_amd64.deb"
+          sudo apt-get install -y /tmp/fwup.deb
+          fwup --version
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Install Nerves bootstrap
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix archive.install hex nerves_bootstrap ${NERVES_BOOTSTRAP_VERSION} --force
+
+      - name: Build system
+        run: |
+          mix deps.get
+          mix compile
+
+      - name: Create artifact
+        run: |
+          mkdir -p deploy
+          mix nerves.artifact nerves_system_fp3 --path deploy
+          ls -l deploy
+
+      - name: Publish prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --prerelease --title "$TAG" \
+              --notes "Prerelease build of nerves_system_fp3 $TAG. See CHANGELOG.md."
+          fi
+          gh release upload "$TAG" deploy/*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber

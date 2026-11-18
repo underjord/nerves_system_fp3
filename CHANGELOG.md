@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.4
+
+Security and bug fix update of the Nerves platform.
+
+### Changed
+
+- `nerves_system_br` 1.35.0 → 1.35.3: Buildroot 2026.08 → 2026.08.1
+  (including the eMudhra ca-certificates update) and Erlang/OTP
+  29.1 → 29.1.2 on the device. Host toolchain binaries no longer run with
+  `LD_LIBRARY_PATH`, and the artifact now includes `nerves-env.cmake` for
+  Hex packages that build native code with CMake.
+- Build hosts: Erlang/OTP 29.1.2 / Elixir 1.20.5-otp-29 (`.tool-versions`).
+
+### Added
+
+- GitHub Actions workflow that builds the system for `v*` tags and
+  publishes the artifact as a prerelease.
+
 ## v0.2.3
 
 ### Fixed
