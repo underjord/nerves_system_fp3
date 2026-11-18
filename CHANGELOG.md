@@ -17,6 +17,15 @@
 - x264, Opus and PortAudio (with its ALSA backend) in the root file
   system, for Membrane's H.264, Opus and PortAudio plugins. ffmpeg picks
   up the libx264 encoder and libopus from them as well.
+- Tools for bringing up the Elan fingerprint sensor, whose SPI bus
+  (a BLSP QUP) TrustZone owns: `qcom_scm_blsp_modify_ownership()`, the
+  TrustZone call that moves a QUP to Linux, with debugfs knobs under
+  `/sys/kernel/debug/qcom_scm` to try it from a running system; the
+  `qcom,tz-blsp-handover` property, which has spi-qup ask for its QUP
+  before probing; `/dev/dtbo`, which applies a device tree overlay from
+  userspace so a node can be tried without a reflash; and spidev binding
+  `elan,efsa-fingerprint` (`patches/linux/0005` to `0009`). spidev is
+  enabled. All of it is experimental.
 
 ### Changed
 

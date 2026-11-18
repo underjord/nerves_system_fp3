@@ -1,0 +1,82 @@
+firmware: qcom: scm: add a BLSP QUP ownership transfer call
+
+Qualcomm boards may give a BLSP QUP to a trusted application, typically
+the SPI of a fingerprint sensor. Its registers then fault when touched
+from Linux, and the board's device tree reserves the pins. TrustZone has
+a call to move a QUP to another owner (SIP service 4, command 3, used by
+vendor fingerprint drivers to pass the bus to and from the TEE). Expose
+it as qcom_scm_blsp_modify_ownership() so a board that runs without the
+trusted application can take the QUP for Linux.
+
+diff -Nur a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+--- a/drivers/firmware/qcom/qcom_scm.c	2026-10-20 12:08:29
++++ b/drivers/firmware/qcom/qcom_scm.c	2026-10-20 12:08:30
+@@ -876,6 +876,41 @@
+ EXPORT_SYMBOL_GPL(qcom_scm_io_writel);
+ 
+ /**
++ * qcom_scm_blsp_modify_ownership() - move a BLSP QUP between TrustZone and Linux
++ * @qup:   the QUP as TrustZone numbers it
++ * @owner: QCOM_SCM_BLSP_OWNER_APSS or QCOM_SCM_BLSP_OWNER_TZ
++ *
++ * A board may give a BLSP QUP to a trusted application (a fingerprint
++ * sensor's SPI, typically). Its registers then fault when touched from
++ * Linux and the device tree keeps its pins reserved. TrustZone offers this
++ * call to hand the QUP to another owner, and decides whether to allow it.
++ *
++ * Return: 0 on success, a negative errno if the call failed or was refused.
++ */
++int qcom_scm_blsp_modify_ownership(u32 qup, u32 owner)
++{
++	struct qcom_scm_desc desc = {
++		.svc = QCOM_SCM_SVC_TZ,
++		.cmd = QCOM_SCM_TZ_BLSP_MODIFY_OWNERSHIP,
++		.arginfo = QCOM_SCM_ARGS(2),
++		.args[0] = qup,
++		.args[1] = owner,
++		.owner = ARM_SMCCC_OWNER_SIP,
++	};
++	struct qcom_scm_res res = {};
++	int ret;
++
++	ret = qcom_scm_call(__scm->dev, &desc, &res);
++	dev_dbg(__scm->dev, "BLSP QUP %u -> owner %u: ret %d, result %#llx\n",
++		qup, owner, ret, res.result[0]);
++	if (ret)
++		return ret;
++
++	return res.result[0] ? -EACCES : 0;
++}
++EXPORT_SYMBOL_GPL(qcom_scm_blsp_modify_ownership);
++
++/**
+  * qcom_scm_restore_sec_cfg_available() - Check if secure environment
+  * supports restore security config interface.
+  *
+diff -Nur a/drivers/firmware/qcom/qcom_scm.h b/drivers/firmware/qcom/qcom_scm.h
+--- a/drivers/firmware/qcom/qcom_scm.h	2026-10-20 12:08:29
++++ b/drivers/firmware/qcom/qcom_scm.h	2026-10-20 12:08:30
+@@ -106,6 +106,9 @@
+ #define QCOM_SCM_PIL_PAS_IS_SUPPORTED	0x07
+ #define QCOM_SCM_PIL_PAS_MSS_RESET	0x0a
+ 
++#define QCOM_SCM_SVC_TZ			0x04
++#define QCOM_SCM_TZ_BLSP_MODIFY_OWNERSHIP	0x03
++
+ #define QCOM_SCM_SVC_IO			0x05
+ #define QCOM_SCM_IO_READ		0x01
+ #define QCOM_SCM_IO_WRITE		0x02
+diff -Nur a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+--- a/include/linux/firmware/qcom/qcom_scm.h	2026-10-20 12:08:29
++++ b/include/linux/firmware/qcom/qcom_scm.h	2026-10-20 12:08:30
+@@ -83,6 +83,10 @@
+ int qcom_scm_io_readl(phys_addr_t addr, unsigned int *val);
+ int qcom_scm_io_writel(phys_addr_t addr, unsigned int val);
+ 
++#define QCOM_SCM_BLSP_OWNER_APSS	1
++#define QCOM_SCM_BLSP_OWNER_TZ		3
++int qcom_scm_blsp_modify_ownership(u32 qup, u32 owner);
++
+ bool qcom_scm_restore_sec_cfg_available(void);
+ int qcom_scm_restore_sec_cfg(u32 device_id, u32 spare);
+ int qcom_scm_set_gpu_smmu_aperture(unsigned int context_bank);

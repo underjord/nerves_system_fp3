@@ -1,0 +1,17 @@
+spi: spidev: bind the Elan fingerprint sensor
+
+The Fairphone 3's Elan fingerprint sensor is driven from userspace over
+spidev; give it a compatible of its own instead of borrowing another
+device's.
+
+diff -Nur a/drivers/spi/spidev.c b/drivers/spi/spidev.c
+--- a/drivers/spi/spidev.c	2026-10-20 12:08:29
++++ b/drivers/spi/spidev.c	2026-10-20 12:08:30
+@@ -741,6 +741,7 @@
+ 	{ .compatible = "arduino,unoq-mcu", .data = &spidev_of_check },
+ 	{ .compatible = "cisco,spi-petra", .data = &spidev_of_check },
+ 	{ .compatible = "dh,dhcom-board", .data = &spidev_of_check },
++	{ .compatible = "elan,efsa-fingerprint", .data = &spidev_of_check },
+ 	{ .compatible = "elgin,jg10309-01", .data = &spidev_of_check },
+ 	{ .compatible = "gocontroll,moduline-module-slot", .data = &spidev_of_check},
+ 	{ .compatible = "lineartechnology,ltc2488", .data = &spidev_of_check },
