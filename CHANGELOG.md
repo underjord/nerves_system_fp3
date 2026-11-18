@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- The firmware's boot splash is on the screen from the moment the panel
+  lights up. The initramfs draws
+  `/etc/splash/splash-<width>x<height>-<bpp>bpp-<stride>.raw` from the root
+  file system as soon as it is mounted, the file the
+  [`nerves_splash`](https://github.com/lawik/nerves_splash) library renders
+  (`packages/citronics-initramfs/0004`). Firmware without it boots as before.
+
+### Changed
+
+- The display is no longer a kernel console: `console=tty0` is gone from the
+  kernel command line and the cursor is off (`vt.global_cursor_default=0`).
+  Kernel messages at `loglevel=8`, and two clock warnings with stack traces
+  from the DSI bring-up, scrolled over the screen between the panel lighting
+  up and the application drawing, and rendering them through the rotated
+  framebuffer console slowed the boot. The kernel log still goes to the
+  serial pads and to ramoops; `dmesg` has all of it. The IEx console stays
+  on `tty1`.
+- The initramfs polls for the eMMC every tenth of a second instead of every
+  second, which had it sleep through half a second of every boot
+  (`packages/citronics-initramfs/0003`).
+
 ## v0.3.0
 
 The cameras now run through the phone's camera image processor (the

@@ -1,0 +1,100 @@
+Show the firmware's boot splash from the initramfs
+
+Nerves firmware with the nerves_splash library renders its splash for the
+framebuffer's exact layout, as
+/etc/splash/splash-<width>x<height>-<bpp>bpp-<stride>.raw, and has erlinit
+draw it before the Erlang VM starts. On a Fairphone 3 that is 4.7 s into
+the boot, while fbcon lights the panel at 3.0 s; until then the screen
+showed kernel text, or black.
+
+Draw it as soon as the root file system is mounted, which is about when
+the framebuffer appears. fbcon takes a new framebuffer over and clears it
+when done, so unbind fbcon first: the write to its bind attribute waits
+for the takeover to finish. Firmware without /etc/splash is left alone.
+--- a/initramfs/usr/share/citronics-initramfs/functions.sh
++++ b/initramfs/usr/share/citronics-initramfs/functions.sh
+@@ -433,5 +433,73 @@
+         mount -o ro "$boot_partition_device" /sysroot/boot
+     else
+         echo_kmsg "Device $boot_partition_device not available after 10 seconds, cannot mount boot partition."
++    fi
++}
++
++# The firmware's boot splash, as soon as the display is up.
++#
++# Nerves firmware with the nerves_splash library ships its splash rendered for
++# the framebuffer's exact layout, as
++# /etc/splash/splash-<width>x<height>-<bpp>bpp-<stride>.raw, and has erlinit
++# draw it before the Erlang VM starts. That is well over a second after the
++# panel lights up, so draw it here first. Firmware without /etc/splash is left
++# alone. The argument is where the root file system is mounted.
++show_boot_splash() {
++    local root="${1:-/sysroot}" fb=/sys/class/graphics/fb0
++    local splash i size bpp stride image fbcon
++    root="${root%/}"
++    splash="$root/etc/splash"
++
++    [ -d "$splash" ] || return 0
++
++    # The display driver may still be probing: give the framebuffer up to 3 s.
++    i=0
++    while [ ! -e /dev/fb0 ] && [ "$i" -lt 30 ]; do
++        tick
++        i=$((i + ticked))
++    done
++    if [ ! -r "$fb/virtual_size" ]; then
++        echo_kmsg "No framebuffer, no boot splash"
++        return 0
++    fi
++
++    read -r size <"$fb/virtual_size"
++    read -r bpp <"$fb/bits_per_pixel"
++    read -r stride <"$fb/stride"
++    image="$splash/splash-${size%,*}x${size#*,}-${bpp}bpp-${stride}.raw"
++    if [ ! -f "$image" ]; then
++        echo_kmsg "No boot splash for a ${size%,*}x${size#*,} framebuffer at $bpp bpp, stride $stride"
++        return 0
+     fi
++
++    # fbcon takes a new framebuffer over, which lights the panel, and clears
++    # it when done. Its vtconsole entry appears first, and unbinding it waits
++    # for the takeover to finish; from then on nothing draws over the splash
++    # until the application does. The ttys keep working, they just aren't
++    # shown.
++    i=0
++    until fbcon=$(fbcon_vtcon) || [ "$i" -ge 5 ]; do
++        tick
++        i=$((i + ticked))
++    done
++    [ -n "$fbcon" ] && echo 0 >"$fbcon/bind"
++
++    if cat "$image" >/dev/fb0; then
++        echo_kmsg "Showing boot splash ${image#"$root"}"
++    else
++        echo_kmsg "Couldn't write the boot splash to /dev/fb0"
++    fi
+ }
++
++# The sysfs entry of the framebuffer console, once it is registered.
++fbcon_vtcon() {
++    local vtcon name
++    for vtcon in /sys/class/vtconsole/vtcon*; do
++        [ -r "$vtcon/name" ] || continue
++        read -r name <"$vtcon/name"
++        case "$name" in
++            *"frame buffer"*) echo "$vtcon"; return 0 ;;
++        esac
++    done
++    return 1
++}
+--- a/initramfs/usr/share/citronics-initramfs/init
++++ b/initramfs/usr/share/citronics-initramfs/init
+@@ -46,6 +46,8 @@
+     mount_rootfs
+ 
+     if grep -q " /sysroot " /proc/mounts; then
++        show_boot_splash /sysroot
++
+         bootpart=$(get_kernel_param "bootpart")
+         if [ -n "$bootpart" ]; then
+             echo_kmsg "Mounting boot partition..."

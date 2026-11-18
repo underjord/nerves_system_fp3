@@ -202,6 +202,26 @@ the subpartitions, mounts the rootfs read-only and `switch_root`s into it.
 the read-only Android partitions `p32`, `p34` and `p13` at `/mnt/vendor`,
 `/mnt/persist` and `/mnt/dsp` for `ex_hexagonfs`.
 
+## Boot splash
+
+The display is not a kernel console. The panel lights up when the kernel's
+framebuffer console takes the framebuffer over, about 3 s into the boot, and
+from then on it shows the firmware's boot splash: as soon as the root file
+system is mounted, the initramfs looks for
+`/etc/splash/splash-<width>x<height>-<bpp>bpp-<stride>.raw` on it (for this
+panel `splash-1080x2160-32bpp-4352.raw`), takes the text console off the
+framebuffer and copies the file onto `/dev/fb0`. The
+[`nerves_splash`](https://github.com/lawik/nerves_splash) library renders
+that file from a PNG in the firmware's `rootfs_overlay`, and has `erlinit`
+draw it too, for systems without this initramfs step. Firmware without
+`/etc/splash` gets a blank screen until its application draws.
+
+The kernel log goes to the serial pads (`ttyMSM0`) and to ramoops, and
+`dmesg` has it. The IEx console is on `tty1`; it is shown when an
+application binds the framebuffer console again
+(`NervesSplash.Console.bind/0`, or `1` into
+`/sys/class/vtconsole/vtcon1/bind`).
+
 ## Notes on specific hardware
 
 **Modem and Wi-Fi.** The kernel auto-boots the ADSP and modem remoteprocs; no

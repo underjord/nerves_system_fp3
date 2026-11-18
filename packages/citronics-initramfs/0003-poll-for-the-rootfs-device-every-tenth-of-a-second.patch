@@ -1,0 +1,74 @@
+Poll for the rootfs device every tenth of a second
+
+The initramfs looked for the firmware's eMMC device once a second. On a
+Fairphone 3 the device shows up 2.84 s into the boot, half a second into
+that wait, so every boot slept through the other half second before
+mapping the subpartitions.
+
+busybox's sleep only takes whole seconds here, but its read takes a
+fractional timeout; a fifo that nobody writes to gives it something to
+wait on. The helper falls back to whole seconds on a busybox whose read
+can't do fractions.
+--- a/initramfs/usr/share/citronics-initramfs/functions.sh
++++ b/initramfs/usr/share/citronics-initramfs/functions.sh
+@@ -24,6 +24,22 @@
+     echo "$LOG_PREFIX $*" > /dev/kmsg
+ }
+ 
++# Wait a tenth of a second. busybox's sleep only takes whole seconds here,
++# but its read takes a fractional timeout, so it waits on a fifo that nobody
++# writes to. $ticked is how many tenths passed: a busybox whose read can't
++# do fractions sleeps a whole second instead.
++tick() {
++    if [ -z "$tick_fifo" ]; then
++        tick_fifo=/run/tick
++        mknod "$tick_fifo" p && exec 9<>"$tick_fifo" && rm "$tick_fifo"
++    fi
++    read -t 0.1 _ <&9 2>/dev/null
++    case $? in
++        142) ticked=1 ;;
++        *) sleep 1; ticked=10 ;;
++    esac
++}
++
+ mount_proc_sys_dev() {
+     mount -t proc -o nodev,noexec,nosuid proc /proc || echo_kmsg "Couldn't mount /proc"
+     mount -t sysfs -o nodev,noexec,nosuid sysfs /sys || echo_kmsg "Couldn't mount /sys"
+@@ -318,9 +334,7 @@
+ }
+ 
+ map_and_resize_root_partition() {
+-    local rootfs part_num rootfs_path base_device mapper_path output
+-    local timeout=10
+-    local delay=1
++    local rootfs part_num rootfs_path base_device mapper_path output i
+ 
+     rootfs=$(get_kernel_param "rootfs")
+     rootfs=${rootfs#/dev/}
+@@ -332,19 +346,19 @@
+ 
+     echo_kmsg "Waiting for rootfs device: $base_device"
+ 
+-    # Wait up to 10 seconds for the rootfs device to appear
+-    for i in $(seq 1 $timeout); do
+-        if [ -b "$base_device" ]; then
+-            echo_kmsg "Found rootfs device: $base_device"
+-            break
+-        fi
+-        sleep $delay
++    # Wait up to 10 seconds for the rootfs device to appear, checking every
++    # tenth of a second: the eMMC shows up half a second into the wait.
++    i=0
++    while [ ! -b "$base_device" ] && [ "$i" -lt 100 ]; do
++        tick
++        i=$((i + ticked))
+     done
+ 
+     if [ ! -b "$base_device" ]; then
+         echo_kmsg "Timeout waiting for rootfs device: $base_device"
+         return 1
+     fi
++    echo_kmsg "Found rootfs device: $base_device"
+ 
+     if has_unallocated_space "$base_device"; then
+         if [ "$(get_kernel_param "resize_rootfs")" = "1" ]; then
