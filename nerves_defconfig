@@ -134,6 +134,10 @@ BR2_PACKAGE_FFMPEG=y
 BR2_PACKAGE_FFMPEG_FFMPEG=y
 BR2_PACKAGE_FFMPEG_GPL=y
 BR2_PACKAGE_FFMPEG_SWSCALE=y
+# x264 and opus are also picked up by ffmpeg (libx264 encoder, libopus) and
+# are linked directly by Membrane's H.264 and Opus plugins.
+BR2_PACKAGE_X264=y
+BR2_PACKAGE_OPUS=y
 
 # libcamera with its SoftwareISP (3A, black level, colour matrix, gamma).
 # The msm8953 CAMSS exposes only raw Bayer; fp3_camera captures through
@@ -156,6 +160,9 @@ BR2_PACKAGE_ALSA_UTILS_AMIXER=y
 BR2_PACKAGE_ALSA_UTILS_APLAY=y
 BR2_PACKAGE_ALSA_UTILS_ALSACTL=y
 BR2_PACKAGE_ALSA_UTILS_ALSAMIXER=y
+# PortAudio over ALSA, for Membrane's PortAudio plugin
+BR2_PACKAGE_PORTAUDIO=y
+BR2_PACKAGE_PORTAUDIO_ALSA=y
 
 # Modem stack — the FP2 Nerves stack drives QMI directly from Elixir via
 # `:qmi` and `:vintage_net_qmi`. We only ship the kernel-side helpers
