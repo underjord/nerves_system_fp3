@@ -26,6 +26,11 @@
   userspace so a node can be tried without a reflash; and spidev binding
   `elan,efsa-fingerprint` (`patches/linux/0005` to `0009`). spidev is
   enabled. All of it is experimental.
+- `qcom_camss.debug_vc` and `debug_dt`: the CSI-2 virtual channel and
+  data type that camss streams take, read when a stream starts. They are
+  0 normally: virtual channel 0, and the format's data type. The IMX363
+  sends its phase detection pixels on virtual channel 1, which an RDI
+  path can now capture (`patches/linux/0010`).
 
 ### Changed
 
