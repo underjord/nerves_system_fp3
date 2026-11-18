@@ -1,0 +1,116 @@
+From a04260ef0adcf4c174a60bc8e8be08c17ef5b7eb Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 29 Oct 2026 16:58:42 +0100
+Subject: [PATCH] media: qcom: camss: choose the virtual channel and data type
+ streams take
+
+The CSID and ISPIF take virtual channel 0 and the format's data type,
+so a sensor's other streams are dropped: the IMX363 sends its phase
+detection pixels on virtual channel 1. debug_vc and debug_dt, read when
+a stream starts, pick another pair for capturing them on an RDI path.
+---
+ drivers/media/platform/qcom/camss/camss-csid-4-7.c |  5 +++--
+ drivers/media/platform/qcom/camss/camss-ispif.c    |  9 +++++++--
+ drivers/media/platform/qcom/camss/camss-ispif.h    |  1 +
+ drivers/media/platform/qcom/camss/camss.c          | 14 ++++++++++++++
+ drivers/media/platform/qcom/camss/camss.h          |  3 +++
+ 5 files changed, 28 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-4-7.c b/drivers/media/platform/qcom/camss/camss-csid-4-7.c
+index 66054d4..eb9d2b3 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-4-7.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-4-7.c
+@@ -53,8 +53,9 @@ static void csid_configure_stream(struct csid_device *csid, u8 enable)
+ 	if (enable) {
+ 		struct v4l2_mbus_framefmt *input_format;
+ 		const struct csid_format_info *format;
+-		u8 vc = 0; /* Virtual Channel 0 */
++		u8 vc = camss_debug_vc & 0x3; /* Virtual Channel, 0 normally */
+ 		u8 cid = vc * 4; /* id of Virtual Channel and Data Type set */
++		u8 dt = camss_debug_dt & 0x3f;
+ 		u8 dt_shift;
+ 
+ 		if (tg->enabled) {
+@@ -111,7 +112,7 @@ static void csid_configure_stream(struct csid_device *csid, u8 enable)
+ 
+ 		val = readl_relaxed(csid->base + CAMSS_CSID_CID_LUT_VC_n(vc));
+ 		val &= ~(0xff << dt_shift);
+-		val |= format->data_type << dt_shift;
++		val |= (dt ? dt : format->data_type) << dt_shift;
+ 		writel_relaxed(val, csid->base + CAMSS_CSID_CID_LUT_VC_n(vc));
+ 
+ 		val = CAMSS_CSID_CID_n_CFG_ISPIF_EN;
+diff --git a/drivers/media/platform/qcom/camss/camss-ispif.c b/drivers/media/platform/qcom/camss/camss-ispif.c
+index f622db7..0c4f605 100644
+--- a/drivers/media/platform/qcom/camss/camss-ispif.c
++++ b/drivers/media/platform/qcom/camss/camss-ispif.c
+@@ -816,10 +816,15 @@ static int ispif_set_stream(struct v4l2_subdev *sd, int enable)
+ 	enum ispif_intf intf = line->interface;
+ 	u8 csid = line->csid_id;
+ 	u8 vfe = line->vfe_id;
+-	u8 vc = 0; /* Virtual Channel 0 */
+-	u8 cid = vc * 4; /* id of Virtual Channel and Data Type set */
++	u8 vc, cid; /* Virtual Channel, and id of the VC and Data Type set */
+ 	int ret;
+ 
++	/* Stopping takes the virtual channel the stream started with. */
++	if (enable)
++		line->vc = camss_debug_vc & 0x3;
++	vc = line->vc;
++	cid = vc * 4;
++
+ 	if (enable) {
+ 		if (!media_pad_remote_pad_first(&line->pads[MSM_ISPIF_PAD_SINK]))
+ 			return -ENOLINK;
+diff --git a/drivers/media/platform/qcom/camss/camss-ispif.h b/drivers/media/platform/qcom/camss/camss-ispif.h
+index f7b3368..367cf3a 100644
+--- a/drivers/media/platform/qcom/camss/camss-ispif.h
++++ b/drivers/media/platform/qcom/camss/camss-ispif.h
+@@ -39,6 +39,7 @@ struct ispif_line {
+ 	u8 id;
+ 	u8 csid_id;
+ 	u8 vfe_id;
++	u8 vc;
+ 	enum ispif_intf interface;
+ 	struct v4l2_subdev subdev;
+ 	struct media_pad pads[MSM_ISPIF_PADS_NUM];
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index ccf1ed3..3f6bb28 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -29,6 +29,20 @@
+ 
+ #include "camss.h"
+ 
++/*
++ * The CSI-2 virtual channel, and data type, that the CSID decodes and the
++ * ISPIF passes on when a stream starts, for capturing a sensor's other
++ * streams on an RDI path: the IMX363 sends its phase detection pixels on
++ * virtual channel 1. A data type of 0 is the format's own.
++ */
++unsigned int camss_debug_vc;
++module_param_named(debug_vc, camss_debug_vc, uint, 0644);
++MODULE_PARM_DESC(debug_vc, "CSI-2 virtual channel streams take (0-3, default 0)");
++
++unsigned int camss_debug_dt;
++module_param_named(debug_dt, camss_debug_dt, uint, 0644);
++MODULE_PARM_DESC(debug_dt, "CSI-2 data type streams take (default 0: the format's)");
++
+ #define CAMSS_CLOCK_MARGIN_NUMERATOR 105
+ #define CAMSS_CLOCK_MARGIN_DENOMINATOR 100
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss.h b/drivers/media/platform/qcom/camss/camss.h
+index e084fb7..fe88875 100644
+--- a/drivers/media/platform/qcom/camss/camss.h
++++ b/drivers/media/platform/qcom/camss/camss.h
+@@ -170,4 +170,7 @@ void camss_buf_done(struct camss *camss, int hw_id, int port_id);
+ void camss_reg_update(struct camss *camss, int hw_id,
+ 		      int port_id, bool is_clear);
+ 
++extern unsigned int camss_debug_vc;
++extern unsigned int camss_debug_dt;
++
+ #endif /* QC_MSM_CAMSS_H */
+-- 
+2.49.0
+
