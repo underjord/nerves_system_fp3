@@ -14,6 +14,9 @@
   rejected, so `hw_pattern` now takes a blink or a breathing ramp. The
   PMIC runs it from its SDAM through PBS, through suspend to idle and
   with no help from the CPU.
+- x264, Opus and PortAudio (with its ALSA backend) in the root file
+  system, for Membrane's H.264, Opus and PortAudio plugins. ffmpeg picks
+  up the libx264 encoder and libopus from them as well.
 
 ### Changed
 
